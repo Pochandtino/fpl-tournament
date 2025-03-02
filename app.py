@@ -5,7 +5,7 @@ import random
 import math
 
 # Set up Streamlit UI
-st.set_page_config(page_title="Fantasy PL Tournament", layout="wide")
+st.set_page_config(page_title="⚽ Fantasy Premier League Tournament", layout="wide")
 
 st.title("⚽ Fantasy Premier League Tournament")
 st.sidebar.header("Tournament Settings")
@@ -29,7 +29,7 @@ if "fpl_data" not in st.session_state:
     if st.sidebar.button("Fetch Data"):
         st.session_state["fpl_data"] = fetch_fpl_data(league_id)
 
-# 📌 Assign Teams to Groups (Manually + Randomization Option)
+# 📌 Assign Teams to Groups (Manual + Randomization Option)
 if "fpl_data" in st.session_state:
     teams = st.session_state["fpl_data"]["standings"]["results"]
     num_teams = len(teams)
@@ -42,11 +42,19 @@ if "fpl_data" in st.session_state:
             group_name = f"Group {chr(65 + (i % num_groups))}"
             st.session_state["groups"][group_name].append(team)
 
+    # 📌 **Display Groups Clearly**
+    st.subheader("🔀 Group Stage Teams")
+    for group_name, members in st.session_state["groups"].items():
+        st.markdown(f"### {group_name}")
+        for team in members:
+            st.write(f"**{team['entry_name']}** (Manager: {team['player_name']})")
+
     # 📌 **Calculate Required Game Weeks**
-    total_group_fixtures = sum(len(members) * (len(members) - 1) // 2 * matches_per_opponent for members in st.session_state["groups"].values())
-    required_gameweeks = math.ceil(total_group_fixtures / (num_teams // num_groups))  # 1 match per team per GW
-    
-    st.sidebar.subheader("📅 Select Game Weeks for Group Stage")
+    teams_per_group = num_teams // num_groups
+    is_odd = teams_per_group % 2 == 1  # Check if there’s a bye needed
+    required_gameweeks = teams_per_group if is_odd else teams_per_group - 1  # Each team plays once per week
+
+    st.sidebar.subheader("📅 Game Week Selection")
     selected_gameweeks = st.sidebar.multiselect(
         f"Choose Game Weeks (Required: {required_gameweeks})", 
         list(range(1, 39)), 
@@ -59,24 +67,40 @@ if "fpl_data" in st.session_state:
     elif len(selected_gameweeks) > required_gameweeks:
         st.sidebar.warning(f"⚠️ You have selected more Game Weeks than required ({len(selected_gameweeks)} vs {required_gameweeks}).")
 
-    # 📅 Fixture Generation with Game Week Assignments
+    # 📅 **Fix Fixtures with Byes & Assign to Game Weeks**
     st.subheader("📅 Group Fixtures with Game Weeks")
-    
+
     if len(selected_gameweeks) >= required_gameweeks:
         fixtures = []
         gameweek_schedule = {gw: [] for gw in selected_gameweeks}
         fixture_count = 0
 
         for group_name, members in st.session_state["groups"].items():
-            for i in range(len(members)):
-                for j in range(i+1, len(members)):  
-                    for _ in range(matches_per_opponent):
-                        fixture_count += 1
-                        gameweek = selected_gameweeks[(fixture_count - 1) % required_gameweeks]
-                        game = f"{members[i]['entry_name']} vs {members[j]['entry_name']} (GW {gameweek})"
-                        gameweek_schedule[gameweek].append(game)
+            team_list = members[:]  # Copy team list
 
-        # Display fixtures by Game Week
+            if len(team_list) % 2 == 1:
+                team_list.append({"entry_name": "BYE", "player_name": ""})  # Add a Bye if odd number of teams
+
+            round_robin_schedule = []
+            num_rounds = len(team_list) - 1
+
+            # **Round Robin Tournament Fixture Generator**
+            for round_num in range(num_rounds):
+                round_matches = []
+                for i in range(len(team_list) // 2):
+                    if team_list[i]['entry_name'] != "BYE" and team_list[-(i + 1)]['entry_name'] != "BYE":
+                        round_matches.append(
+                            f"{team_list[i]['entry_name']} vs {team_list[-(i + 1)]['entry_name']} (Group {group_name})"
+                        )
+                round_robin_schedule.append(round_matches)
+                team_list.insert(1, team_list.pop())  # Rotate teams
+
+            # Assign fixtures to Game Weeks
+            for gw, matches in zip(selected_gameweeks, round_robin_schedule):
+                for match in matches:
+                    gameweek_schedule[gw].append(match)
+
+        # ✅ **Display fixtures grouped by Game Week**
         for gw, games in gameweek_schedule.items():
             st.write(f"### Game Week {gw}")
             for game in games:
