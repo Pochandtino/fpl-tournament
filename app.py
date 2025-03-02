@@ -16,10 +16,6 @@ num_groups = st.sidebar.slider("Number of Groups", 2, 8, 4)
 matches_per_opponent = st.sidebar.radio("Matches Against Each Opponent", [1, 2], index=1)
 randomize_groups = st.sidebar.button("Randomize Groups")
 
-# Game Week Selection
-st.sidebar.subheader("📅 Select Game Weeks for Group Stage")
-selected_gameweeks = st.sidebar.multiselect("Choose Game Weeks", list(range(1, 39)), default=list(range(1, 9)))
-
 # API Call Function
 BASE_URL = "https://fantasy.premierleague.com/api"
 
@@ -38,7 +34,7 @@ if "fpl_data" in st.session_state:
     teams = st.session_state["fpl_data"]["standings"]["results"]
     num_teams = len(teams)
 
-    # Auto-assign teams into groups OR allow manual selection
+    # ✅ Auto-assign teams into groups OR allow manual selection
     if "groups" not in st.session_state or randomize_groups:
         random.shuffle(teams)  # Shuffle if randomizing
         st.session_state["groups"] = {f"Group {chr(65+i)}": [] for i in range(num_groups)}
@@ -46,39 +42,37 @@ if "fpl_data" in st.session_state:
             group_name = f"Group {chr(65 + (i % num_groups))}"
             st.session_state["groups"][group_name].append(team)
 
-    st.subheader("🔀 Group Stage Setup")
-    for group_name in st.session_state["groups"]:
-        st.markdown(f"### {group_name}")
-        for i, team in enumerate(st.session_state["groups"][group_name]):
-            selected_team = st.selectbox(
-                f"{group_name} - Team {i+1}",
-                [team["entry_name"] for team in teams],
-                index=[team["entry_name"] for team in teams].index(team["entry_name"]),
-                key=f"{group_name}_{i}"
-            )
-            # Assign the selected team to the group
-            st.session_state["groups"][group_name][i] = next(t for t in teams if t["entry_name"] == selected_team)
+    # 📌 **Calculate Required Game Weeks**
+    total_group_fixtures = sum(len(members) * (len(members) - 1) // 2 * matches_per_opponent for members in st.session_state["groups"].values())
+    required_gameweeks = math.ceil(total_group_fixtures / (num_teams // num_groups))  # 1 match per team per GW
+    
+    st.sidebar.subheader("📅 Select Game Weeks for Group Stage")
+    selected_gameweeks = st.sidebar.multiselect(
+        f"Choose Game Weeks (Required: {required_gameweeks})", 
+        list(range(1, 39)), 
+        default=list(range(1, required_gameweeks + 1))
+    )
+
+    # ⚠️ Warning if too few or too many Game Weeks are selected
+    if len(selected_gameweeks) < required_gameweeks:
+        st.sidebar.error(f"⚠️ Not enough Game Weeks selected! You need at least {required_gameweeks}.")
+    elif len(selected_gameweeks) > required_gameweeks:
+        st.sidebar.warning(f"⚠️ You have selected more Game Weeks than required ({len(selected_gameweeks)} vs {required_gameweeks}).")
 
     # 📅 Fixture Generation with Game Week Assignments
     st.subheader("📅 Group Fixtures with Game Weeks")
     
-    total_fixtures = sum(len(members) * (len(members) - 1) // 2 * matches_per_opponent for members in st.session_state["groups"].values())
-    total_gameweeks = len(selected_gameweeks)
-
-    if total_gameweeks < math.ceil(total_fixtures / (num_teams // num_groups)):
-        st.error("⚠️ Not enough Game Weeks selected to fit all matches! Increase the number of Game Weeks.")
-    else:
+    if len(selected_gameweeks) >= required_gameweeks:
         fixtures = []
         gameweek_schedule = {gw: [] for gw in selected_gameweeks}
         fixture_count = 0
 
         for group_name, members in st.session_state["groups"].items():
-            group_fixtures = []
             for i in range(len(members)):
                 for j in range(i+1, len(members)):  
                     for _ in range(matches_per_opponent):
                         fixture_count += 1
-                        gameweek = selected_gameweeks[(fixture_count - 1) % total_gameweeks]
+                        gameweek = selected_gameweeks[(fixture_count - 1) % required_gameweeks]
                         game = f"{members[i]['entry_name']} vs {members[j]['entry_name']} (GW {gameweek})"
                         gameweek_schedule[gameweek].append(game)
 
@@ -87,6 +81,8 @@ if "fpl_data" in st.session_state:
             st.write(f"### Game Week {gw}")
             for game in games:
                 st.write(game)
+    else:
+        st.error("❌ Cannot generate fixtures until enough Game Weeks are selected.")
 
     # 🏆 Knockout Stage Qualification
     st.subheader("🏆 Knockout Stage Qualification")
