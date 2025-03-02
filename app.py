@@ -11,7 +11,9 @@ st.sidebar.header("Tournament Settings")
 
 # 🎯 User Inputs
 league_id = st.sidebar.text_input("Enter League ID", value="857")
-update_data = st.sidebar.button("Fetch Data")
+num_groups = st.sidebar.slider("Number of Groups", 2, 8, 4)
+matches_per_opponent = st.sidebar.radio("Matches Against Each Opponent", [1, 2], index=1)
+randomize_groups = st.sidebar.button("Randomize Groups")
 
 # API Call Function
 BASE_URL = "https://fantasy.premierleague.com/api"
@@ -21,57 +23,48 @@ def fetch_fpl_data(league_id):
     response = requests.get(url)
     return response.json()
 
-if update_data:
-    data = fetch_fpl_data(league_id)
-    st.session_state["fpl_data"] = data
+# Fetch and store data
+if "fpl_data" not in st.session_state:
+    if st.sidebar.button("Fetch Data"):
+        st.session_state["fpl_data"] = fetch_fpl_data(league_id)
 
-# 💡 Smart Group Allocation Function
-def allocate_groups(teams):
-    num_teams = len(teams)
-
-    # ✅ Best group sizes for fairness
-    ideal_group_sizes = [4, 5, 6]  # Common formats
-    best_group_size = min(ideal_group_sizes, key=lambda x: abs(num_teams // x - num_teams / x))
-    
-    num_groups = num_teams // best_group_size
-    remainder = num_teams % best_group_size
-
-    # If remainder exists, some groups will have an extra team
-    groups = [[] for _ in range(num_groups)]
-    random.shuffle(teams)  # Shuffle to randomize distribution
-
-    index = 0
-    for team in teams:
-        groups[index % num_groups].append(team)
-        index += 1
-
-    return groups
-
-# 🎯 Process API Data
+# 📌 Assign Teams to Groups (Manually + Randomization Option)
 if "fpl_data" in st.session_state:
     teams = st.session_state["fpl_data"]["standings"]["results"]
-    num_teams = len(teams)
+    team_names = [team["entry_name"] for team in teams]
 
-    # 📌 Smart group allocation
-    groups = allocate_groups(teams)
+    # Create session state for groups
+    if "groups" not in st.session_state or randomize_groups:
+        random.shuffle(teams)  # Shuffle if randomizing
+        st.session_state["groups"] = {f"Group {chr(65+i)}": [] for i in range(num_groups)}
+        for i, team in enumerate(teams):
+            group_name = f"Group {chr(65 + (i % num_groups))}"
+            st.session_state["groups"][group_name].append(team)
 
-    # 🔀 Display Group Stage Draw
-    st.subheader("🔀 Group Stage Draw")
-    for i, group in enumerate(groups):
-        st.markdown(f"### Group {chr(65+i)}")
-        for team in group:
-            st.write(f"**{team['entry_name']}** - Manager: {team['player_name']} (Rank: {team['rank']})")
+    st.subheader("🔀 Group Stage Setup")
+    for group_name in st.session_state["groups"]:
+        st.markdown(f"### {group_name}")
+        for i, team in enumerate(st.session_state["groups"][group_name]):
+            selected_team = st.selectbox(
+                f"{group_name} - Team {i+1}",
+                team_names,
+                index=team_names.index(team["entry_name"]),
+                key=f"{group_name}_{i}"
+            )
+            # Assign the selected team to the group
+            st.session_state["groups"][group_name][i] = next(t for t in teams if t["entry_name"] == selected_team)
 
-    # 📅 Fixture Generation (Each team plays all other teams once)
-    st.subheader("📅 Fixtures")
+    # 📅 Fixture Generation
+    st.subheader("📅 Group Fixtures")
     fixtures = []
-    for i, group in enumerate(groups):
+    for group_name, members in st.session_state["groups"].items():
         group_fixtures = []
-        for j in range(len(group)):
-            for k in range(j+1, len(group)):  # Each team plays each other once
-                game = f"{group[j]['entry_name']} vs {group[k]['entry_name']}"
-                group_fixtures.append(game)
-        fixtures.append((f"Group {chr(65+i)}", group_fixtures))
+        for i in range(len(members)):
+            for j in range(i+1, len(members)):  # Each team plays each other
+                for _ in range(matches_per_opponent):
+                    game = f"{members[i]['entry_name']} vs {members[j]['entry_name']}"
+                    group_fixtures.append(game)
+        fixtures.append((group_name, group_fixtures))
 
     for group_name, games in fixtures:
         st.write(f"### {group_name}")
@@ -82,8 +75,8 @@ if "fpl_data" in st.session_state:
     st.subheader("🏆 Knockout Stage Qualification")
     qualified_teams = []
     
-    for group in groups:
-        sorted_teams = sorted(group, key=lambda t: t['rank'])  # Placeholder for real points
+    for group_name, members in st.session_state["groups"].items():
+        sorted_teams = sorted(members, key=lambda t: t['rank'])  # Placeholder for real points
         qualified_teams.extend(sorted_teams[:2])  # Top 2 advance
 
     st.write("**Teams progressing to Knockouts:**")
