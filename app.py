@@ -7,6 +7,7 @@ import requests
 import json
 import random
 import pandas as pd
+from datetime import datetime
 
 # 📌 Streamlit UI Setup
 st.set_page_config(page_title="⚽ Fantasy Premier League Tournament", layout="wide")
@@ -19,8 +20,17 @@ num_groups = st.sidebar.slider("Number of Groups", 2, 8, 4)
 matches_per_opponent = st.sidebar.radio("Matches Against Each Opponent", [1, 2], index=1)
 randomize_groups = st.sidebar.button("Randomize Groups")
 
-# 🔗 API Configuration
+# 📌 Get Current Game Week
 BASE_URL = "https://fantasy.premierleague.com/api"
+
+def get_current_gameweek():
+    """Fetch current FPL gameweek from API"""
+    url = f"{BASE_URL}/bootstrap-static/"
+    response = requests.get(url).json()
+    current_gw = next((gw["id"] for gw in response["events"] if gw["is_current"]), None)
+    return current_gw if current_gw else 1  # Default to 1 if not found
+
+CURRENT_GAMEWEEK = get_current_gameweek()
 
 def fetch_fpl_data(league_id):
     """Fetch league standings from FPL API."""
@@ -37,9 +47,7 @@ def fetch_team_gameweek_points(manager_id):
         return {}  # Return empty dict if API call fails
 
     data = response.json()
-    if "current" in data:
-        return {gw["event"]: gw["points"] for gw in data["current"]}
-    return {}  # Return empty dict if 'current' key is missing
+    return {gw["event"]: gw["points"] for gw in data.get("current", [])}
 
 # 📌 Fetch League Data
 if "fpl_data" not in st.session_state:
@@ -116,38 +124,42 @@ if "fpl_data" in st.session_state:
                 home_team_id = home_team.get("entry", None)
                 away_team_id = away_team.get("entry", None)
 
-                if home_team_id and away_team_id:
-                    home_points = fetch_team_gameweek_points(home_team_id).get(gameweek, 0)
-                    away_points = fetch_team_gameweek_points(away_team_id).get(gameweek, 0)
+                if gameweek > CURRENT_GAMEWEEK:
+                    home_points, away_points = "-", "-"  # Show blank for future matches
+                elif home_team_id and away_team_id:
+                    home_points = fetch_team_gameweek_points(home_team_id).get(gameweek, "-")
+                    away_points = fetch_team_gameweek_points(away_team_id).get(gameweek, "-")
                 else:
-                    home_points, away_points = 0, 0  # Default to 0 if no valid ID
+                    home_points, away_points = "-", "-"
 
                 result = f"**{home_team['entry_name']}** ({home_points}) vs **{away_team['entry_name']}** ({away_points})"
                 st.write(result)
 
-                if group_name not in standings:
-                    standings[group_name] = {}
+                if gameweek <= CURRENT_GAMEWEEK:  # ✅ Only count completed matches in standings
+                    if group_name not in standings:
+                        standings[group_name] = {}
 
-                for team, score, conceded in [(home_team, home_points, away_points), (away_team, away_points, home_points)]:
-                    if team["entry"] not in standings[group_name]:
-                        standings[group_name][team["entry"]] = {
-                            "Team": team["entry_name"],
-                            "P": 0, "W": 0, "D": 0, "L": 0, "F": 0, "A": 0, "GD": 0, "Pts": 0
-                        }
+                    for team, score, conceded in [(home_team, home_points, away_points), (away_team, away_points, home_points)]:
+                        if team["entry"] not in standings[group_name]:
+                            standings[group_name][team["entry"]] = {
+                                "Team": team["entry_name"],
+                                "P": 0, "W": 0, "D": 0, "L": 0, "F": 0, "A": 0, "GD": 0, "Pts": 0
+                            }
 
-                    standings[group_name][team["entry"]]["P"] += 1
-                    standings[group_name][team["entry"]]["F"] += score
-                    standings[group_name][team["entry"]]["A"] += conceded
-                    standings[group_name][team["entry"]]["GD"] = standings[group_name][team["entry"]]["F"] - standings[group_name][team["entry"]]["A"]
+                        standings[group_name][team["entry"]]["P"] += 1
+                        standings[group_name][team["entry"]]["F"] += int(score) if score != "-" else 0
+                        standings[group_name][team["entry"]]["A"] += int(conceded) if conceded != "-" else 0
+                        standings[group_name][team["entry"]]["GD"] = standings[group_name][team["entry"]]["F"] - standings[group_name][team["entry"]]["A"]
 
-                    if score > conceded:
-                        standings[group_name][team["entry"]]["W"] += 1
-                        standings[group_name][team["entry"]]["Pts"] += 3
-                    elif score < conceded:
-                        standings[group_name][team["entry"]]["L"] += 1
-                    else:
-                        standings[group_name][team["entry"]]["D"] += 1
-                        standings[group_name][team["entry"]]["Pts"] += 1
+                        if score != "-" and conceded != "-":
+                            if score > conceded:
+                                standings[group_name][team["entry"]]["W"] += 1
+                                standings[group_name][team["entry"]]["Pts"] += 3
+                            elif score < conceded:
+                                standings[group_name][team["entry"]]["L"] += 1
+                            else:
+                                standings[group_name][team["entry"]]["D"] += 1
+                                standings[group_name][team["entry"]]["Pts"] += 1
 
         # 🔹 **Display Group Standings**
         st.subheader("📊 Group Standings")
