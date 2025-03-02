@@ -1,0 +1,33 @@
+name: Daily Tournament Update
+
+on:
+  schedule:
+    - cron: '0 1 * * *'  # Runs at 1 AM UTC (2 AM UK Time)
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v2
+
+    - name: Set Up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.9'
+
+    - name: Install Dependencies
+      run: |
+        pip install requests
+
+    - name: Update Tournament Data
+      run: python update_tournament.py
+
+    - name: Commit and Push Changes
+      run: |
+        git config --local user.email "github-actions@github.com"
+        git config --local user.name "GitHub Actions"
+        git add .
+        git commit -m "Daily update" || echo "No changes to commit"
+        git push
