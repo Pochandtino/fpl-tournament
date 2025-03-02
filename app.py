@@ -1,9 +1,7 @@
 import streamlit as st
 import requests
-import pandas as pd
 import json
 import random
-import matplotlib.pyplot as plt
 
 # Set up Streamlit UI
 st.set_page_config(page_title="Fantasy PL Tournament", layout="wide")
@@ -11,13 +9,8 @@ st.set_page_config(page_title="Fantasy PL Tournament", layout="wide")
 st.title("⚽ Fantasy Premier League Tournament")
 st.sidebar.header("Tournament Settings")
 
-# 🎯 Tournament Configuration (User Input)
+# 🎯 User Inputs
 league_id = st.sidebar.text_input("Enter League ID", value="857")
-num_groups = st.sidebar.slider("Number of Groups", 2, 8, 4)
-matches_per_opponent = st.sidebar.radio("Matches Against Each Opponent", [1, 2], index=1)
-teams_to_qualify = st.sidebar.slider("Teams to Qualify Per Group", 1, 4, 2)
-best_records_to_qualify = st.sidebar.slider("Wildcard Teams (Best Records)", 0, 4, 2)
-tie_breakers = st.sidebar.multiselect("Tie-Breakers", ["points", "goal_difference", "head_to_head"], default=["points", "goal_difference"])
 update_data = st.sidebar.button("Fetch Data")
 
 # API Call Function
@@ -32,59 +25,76 @@ if update_data:
     data = fetch_fpl_data(league_id)
     st.session_state["fpl_data"] = data
 
-# Display Data
+# 💡 Smart Group Allocation Function
+def allocate_groups(teams):
+    num_teams = len(teams)
+
+    # ✅ Best group sizes for fairness
+    ideal_group_sizes = [4, 5, 6]  # Common formats
+    best_group_size = min(ideal_group_sizes, key=lambda x: abs(num_teams // x - num_teams / x))
+    
+    num_groups = num_teams // best_group_size
+    remainder = num_teams % best_group_size
+
+    # If remainder exists, some groups will have an extra team
+    groups = [[] for _ in range(num_groups)]
+    random.shuffle(teams)  # Shuffle to randomize distribution
+
+    index = 0
+    for team in teams:
+        groups[index % num_groups].append(team)
+        index += 1
+
+    return groups
+
+# 🎯 Process API Data
 if "fpl_data" in st.session_state:
     teams = st.session_state["fpl_data"]["standings"]["results"]
-    
-    # Shuffle teams for random allocation
-    random.shuffle(teams)
-    groups = {f"Group {chr(65+i)}": teams[i::num_groups] for i in range(num_groups)}
+    num_teams = len(teams)
 
+    # 📌 Smart group allocation
+    groups = allocate_groups(teams)
+
+    # 🔀 Display Group Stage Draw
     st.subheader("🔀 Group Stage Draw")
-    for group, members in groups.items():
-        st.markdown(f"### {group}")
-        for team in members:
+    for i, group in enumerate(groups):
+        st.markdown(f"### Group {chr(65+i)}")
+        for team in group:
             st.write(f"**{team['entry_name']}** - Manager: {team['player_name']} (Rank: {team['rank']})")
 
-    # ✅ Now we know how many times each team plays each other
-    st.subheader("📅 Group Fixtures")
+    # 📅 Fixture Generation (Each team plays all other teams once)
+    st.subheader("📅 Fixtures")
     fixtures = []
-    for group_name, members in groups.items():
-        num_teams = len(members)
-        if num_teams % 2 != 0:
-            members.append(None)  # Add a "bye" team if odd number
-
+    for i, group in enumerate(groups):
         group_fixtures = []
-        for i in range(len(members)):
-            for j in range(i+1, len(members)):
-                if members[i] and members[j]:  # Avoid "None" matches
-                    for _ in range(matches_per_opponent):
-                        group_fixtures.append(f"{members[i]['entry_name']} vs {members[j]['entry_name']}")
+        for j in range(len(group)):
+            for k in range(j+1, len(group)):  # Each team plays each other once
+                game = f"{group[j]['entry_name']} vs {group[k]['entry_name']}"
+                group_fixtures.append(game)
+        fixtures.append((f"Group {chr(65+i)}", group_fixtures))
 
-        fixtures.append({group_name: group_fixtures})
-    
-    # Display fixtures
-    for fixture_group in fixtures:
-        for group_name, games in fixture_group.items():
-            st.write(f"### {group_name}")
-            for game in games:
-                st.write(game)
+    for group_name, games in fixtures:
+        st.write(f"### {group_name}")
+        for game in games:
+            st.write(game)
 
-    # 🏆 Knockout Stage (Using Configurable Rules)
-    st.subheader("🏆 Knockout Bracket")
+    # 🏆 Knockout Stage Qualification
+    st.subheader("🏆 Knockout Stage Qualification")
     qualified_teams = []
+    
+    for group in groups:
+        sorted_teams = sorted(group, key=lambda t: t['rank'])  # Placeholder for real points
+        qualified_teams.extend(sorted_teams[:2])  # Top 2 advance
 
-    for group_name, members in groups.items():
-        sorted_teams = sorted(members, key=lambda t: t['rank'])  # Sort by rank as a placeholder for points
-        qualified_teams.extend(sorted_teams[:teams_to_qualify])
+    st.write("**Teams progressing to Knockouts:**")
+    for team in qualified_teams:
+        st.write(f"**{team['entry_name']}**")
 
-    # Wildcard spots (best records)
-    wildcard_teams = sorted(teams, key=lambda t: t['rank'])[:best_records_to_qualify]
-    qualified_teams.extend(wildcard_teams)
-
+    # 🏆 Knockout Bracket
+    st.subheader("🏆 Knockout Bracket")
     random.shuffle(qualified_teams)
     knockout_rounds = ["Quarter-Finals", "Semi-Finals", "Final"]
-    
+
     for round_name in knockout_rounds:
         st.markdown(f"### {round_name}")
         new_round = []
