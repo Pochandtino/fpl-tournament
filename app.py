@@ -1,11 +1,24 @@
+# 🏆 Ensure Groups & Fixtures are Loaded Before Proceeding
+if "groups" not in st.session_state or not st.session_state["groups"]:
+    st.warning("No groups have been assigned yet. Please assign teams to groups first.")
+    st.stop()  # Stop execution to prevent further errors
+
+if "fixtures" not in st.session_state or not st.session_state["fixtures"]:
+    st.warning("No fixtures have been generated yet. Please generate fixtures first.")
+    st.stop()
+
+if "CURRENT_GAMEWEEK" not in st.session_state:
+    st.warning("Current gameweek data is missing. Fetch league data first.")
+    st.stop()
+
 # 📊 Generate Standings for Each Group
 st.subheader("📊 Group Standings")
 
-# Define standings table structure
+# Iterate through groups
 for group_name, members in st.session_state["groups"].items():
     st.markdown(f"### {group_name}")
 
-    # Initialize standings data structure
+    # Initialize standings table
     standings = {
         "Team": [],
         "Manager": [],
@@ -19,11 +32,16 @@ for group_name, members in st.session_state["groups"].items():
         "Tournament Points": [],  # 3 for win, 1 for draw
     }
 
-    team_results = {team["entry"]: {"P": 0, "W": 0, "D": 0, "L": 0, "FPL Points": 0, "FPL Conceded": 0, "Tournament Points": 0} for team in members}
+    # Prepare a dictionary to track stats
+    team_results = {team["entry"]: {
+        "P": 0, "W": 0, "D": 0, "L": 0, 
+        "FPL Points": 0, "FPL Conceded": 0, 
+        "Tournament Points": 0
+    } for team in members}
 
     # Process each fixture
-    for gw, match_list in enumerate(fixtures[group_name], start=1):
-        if gw > CURRENT_GAMEWEEK:
+    for gw, match_list in st.session_state["fixtures"][group_name].items():
+        if gw > st.session_state["CURRENT_GAMEWEEK"]:
             continue  # Ignore future gameweeks
 
         for match in match_list:
@@ -31,8 +49,8 @@ for group_name, members in st.session_state["groups"].items():
             away_team = match["away"]
             home_id, away_id = home_team["entry"], away_team["entry"]
 
-            home_points = fetch_team_gameweek_points(home_id).get(gw, None)
-            away_points = fetch_team_gameweek_points(away_id).get(gw, None)
+            home_points = st.session_state["team_points"].get(home_id, {}).get(gw, None)
+            away_points = st.session_state["team_points"].get(away_id, {}).get(gw, None)
 
             if home_points is not None and away_points is not None:
                 # Update stats
@@ -59,7 +77,7 @@ for group_name, members in st.session_state["groups"].items():
                     team_results[home_id]["Tournament Points"] += 1
                     team_results[away_id]["Tournament Points"] += 1
 
-    # Convert data to DataFrame
+    # Convert to DataFrame
     for team in members:
         team_id = team["entry"]
         standings["Team"].append(team["entry_name"])
@@ -73,10 +91,11 @@ for group_name, members in st.session_state["groups"].items():
         standings["FPL Diff"].append(team_results[team_id]["FPL Points"] - team_results[team_id]["FPL Conceded"])
         standings["Tournament Points"].append(team_results[team_id]["Tournament Points"])
 
+    # Convert to DataFrame & Sort
     df = pd.DataFrame(standings)
     
-    # Sort by Tournament Points, then FPL Diff, then FPL Points
-    df = df.sort_values(by=["Tournament Points", "FPL Diff", "FPL Points"], ascending=[False, False, False])
-
-    # Display standings
-    st.dataframe(df.set_index("Team"))
+    if not df.empty:
+        df = df.sort_values(by=["Tournament Points", "FPL Diff", "FPL Points"], ascending=[False, False, False])
+        st.dataframe(df.set_index("Team"))
+    else:
+        st.warning(f"No matches played yet for {group_name}.")
