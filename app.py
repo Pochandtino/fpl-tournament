@@ -1,6 +1,5 @@
 # 📂 File: app.py
 # 🔹 Fantasy Premier League Tournament Management App
-# 🔹 Fetches real FPL data, organizes teams into groups, schedules fixtures, and tracks live results.
 
 import streamlit as st
 import requests
@@ -72,7 +71,7 @@ if "fpl_data" in st.session_state:
     for group_name, members in st.session_state["groups"].items():
         st.markdown(f"### {group_name}")
         for team in members:
-            st.write(f"**{team['entry_name']}** (Manager: {team['player_name']})")
+            st.write(f"**{team['entry_name']}** ({team['player_name']})")
 
     # 📌 **Calculate Required Game Weeks**
     teams_per_group = num_teams // num_groups
@@ -132,7 +131,7 @@ if "fpl_data" in st.session_state:
                 else:
                     home_points, away_points = "-", "-"
 
-                result = f"**{home_team['entry_name']}** ({home_points}) vs **{away_team['entry_name']}** ({away_points})"
+                result = f"**{home_team['entry_name']} ({home_team['player_name']})** ({home_points}) vs **{away_team['entry_name']} ({away_team['player_name']})** ({away_points})"
                 st.write(result)
 
                 if gameweek <= CURRENT_GAMEWEEK:  # ✅ Only count completed matches in standings
@@ -142,7 +141,7 @@ if "fpl_data" in st.session_state:
                     for team, score, conceded in [(home_team, home_points, away_points), (away_team, away_points, home_points)]:
                         if team["entry"] not in standings[group_name]:
                             standings[group_name][team["entry"]] = {
-                                "Team": team["entry_name"],
+                                "Team": f"{team['entry_name']} ({team['player_name']})",
                                 "P": 0, "W": 0, "D": 0, "L": 0, "F": 0, "A": 0, "GD": 0, "Pts": 0
                             }
 
