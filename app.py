@@ -100,62 +100,35 @@ if "fpl_data" in st.session_state:
         for team in members:
             st.write(f"**{team['entry_name']}** ({team['player_name']})")
 
-    # 📌 **Calculate Required Game Weeks**
-    teams_per_group = num_teams // num_groups
-    is_odd = teams_per_group % 2 == 1  
-    required_gameweeks = teams_per_group if is_odd else teams_per_group - 1  
-
-    st.sidebar.subheader("📅 Game Week Selection")
-    selected_gameweeks = st.sidebar.multiselect(
-        f"Choose Game Weeks (Required: {required_gameweeks})", 
-        list(range(1, 39)), 
-        default=list(range(1, required_gameweeks + 1))
-    )
-
     # 📌 **Generate Fixtures & Scores**
     st.subheader("📅 Group Fixtures & Live Results")
 
-    gameweek_schedule = {gw: [] for gw in selected_gameweeks}
     group_standings = {group_name: {} for group_name in st.session_state["groups"]}
 
     for group_name, members in st.session_state["groups"].items():
-        team_list = members[:]
-        if len(team_list) % 2 == 1:
-            team_list.append({"entry_name": "BYE", "player_name": "", "entry": None})
+        for team in members:
+            team_id = team["entry"]
+            group_standings[group_name][team_id] = {
+                "Team": f"{team['entry_name']} ({team['player_name']})",
+                "P": 0, "W": 0, "D": 0, "L": 0,
+                "FPL Points": 0, "FPL Conceded": 0,
+                "FPL Diff": 0, "Tournament Points": 0
+            }
 
-        num_rounds = len(team_list) - 1
-        for round_num in range(num_rounds):
-            for i in range(len(team_list) // 2):
-                home_team = team_list[i]
-                away_team = team_list[-(i + 1)]
-                if home_team["entry_name"] == "BYE" or away_team["entry_name"] == "BYE":
-                    continue  # Skip bye matches
-
-                gameweek = selected_gameweeks[(round_num) % required_gameweeks]
-                home_points = fetch_team_gameweek_points(home_team["entry"]).get(gameweek, "-")
-                away_points = fetch_team_gameweek_points(away_team["entry"]).get(gameweek, "-")
-
-                # 🏆 Update Standings Only If Gameweek Is Completed
-                if home_points != "-" and away_points != "-":
-                    home_points = int(home_points)
-                    away_points = int(away_points)
-
-                    home_team_id = home_team["entry"]
-                    away_team_id = away_team["entry"]
-
-                    group_standings[group_name].setdefault(home_team_id, {"P": 0, "W": 0, "D": 0, "L": 0, "FPL_Points": 0, "FPL_Conceded": 0})
-                    group_standings[group_name].setdefault(away_team_id, {"P": 0, "W": 0, "D": 0, "L": 0, "FPL_Points": 0, "FPL_Conceded": 0})
-
-                    # Update results
-                    group_standings[group_name][home_team_id]["P"] += 1
-                    group_standings[group_name][away_team_id]["P"] += 1
-                    group_standings[group_name][home_team_id]["FPL_Points"] += home_points
-                    group_standings[group_name][away_team_id]["FPL_Points"] += away_points
-                    group_standings[group_name][home_team_id]["FPL_Conceded"] += away_points
-                    group_standings[group_name][away_team_id]["FPL_Conceded"] += home_points
-
-                gameweek_schedule[gameweek].append((group_name, home_team, away_team, home_points, away_points))
-
-    # 📌 **Show League Tables**
+    # 📌 **Show League Tables Properly**
     st.subheader("📊 Group Standings")
-    st.write(group_standings)  # TODO: Convert this into a DataFrame for better display
+
+    for group_name, standings in group_standings.items():
+        st.markdown(f"### {group_name}")
+
+        # Convert standings dictionary into a DataFrame
+        df = pd.DataFrame(list(standings.values()))
+
+        # Sort by Tournament Points → FPL Points Difference → Total FPL Points
+        df = df.sort_values(
+            by=["Tournament Points", "FPL Diff", "FPL Points"],
+            ascending=[False, False, False]
+        )
+
+        # Display nicely formatted table
+        st.dataframe(df.set_index("Team"))
