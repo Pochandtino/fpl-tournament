@@ -1,5 +1,5 @@
 # 📂 File: app.py
-# ⚽ Fantasy Premier League Tournament Management App
+# 🔹 Fantasy Premier League Tournament Management App
 
 import streamlit as st
 import requests
@@ -39,12 +39,6 @@ def fetch_fpl_data(league_id):
     url = f"{BASE_URL}/leagues-classic/{league_id}/standings/"
     response = requests.get(url)
     return response.json() if response.status_code == 200 else {}
-
-def fetch_team_gameweek_points(manager_id):
-    """Fetch team points for each gameweek"""
-    url = f"{BASE_URL}/entry/{manager_id}/history/"
-    response = requests.get(url).json()
-    return {gw["event"]: gw["points"] for gw in response.get("current", [])}
 
 # 📌 Fetch League Data
 if "fpl_data" not in st.session_state:
@@ -100,35 +94,59 @@ if "fpl_data" in st.session_state:
         for team in members:
             st.write(f"**{team['entry_name']}** ({team['player_name']})")
 
-    # 📌 **Generate Fixtures & Scores**
+    # 📌 **Calculate Required Game Weeks**
+    teams_per_group = num_teams // num_groups
+    is_odd = teams_per_group % 2 == 1  
+    required_gameweeks = teams_per_group if is_odd else teams_per_group - 1  
+
+    st.sidebar.subheader("📅 Game Week Selection")
+    selected_gameweeks = st.sidebar.multiselect(
+        f"Choose Game Weeks (Required: {required_gameweeks})", 
+        list(range(1, 39)), 
+        default=list(range(1, required_gameweeks + 1))
+    )
+
+    # ⚠️ Warning if too few or too many Game Weeks are selected
+    if len(selected_gameweeks) < required_gameweeks:
+        st.sidebar.error(f"⚠️ Not enough Game Weeks selected! You need at least {required_gameweeks}.")
+    elif len(selected_gameweeks) > required_gameweeks:
+        st.sidebar.warning(f"⚠️ You have selected more Game Weeks than required ({len(selected_gameweeks)} vs {required_gameweeks}).")
+
+    # 📅 **Generate Fixtures**
     st.subheader("📅 Group Fixtures & Live Results")
 
-    group_standings = {group_name: {} for group_name in st.session_state["groups"]}
+    if len(selected_gameweeks) >= required_gameweeks:
+        gameweek_schedule = {gw: [] for gw in selected_gameweeks}
 
-    for group_name, members in st.session_state["groups"].items():
-        for team in members:
-            team_id = team["entry"]
-            group_standings[group_name][team_id] = {
-                "Team": f"{team['entry_name']} ({team['player_name']})",
-                "P": 0, "W": 0, "D": 0, "L": 0,
-                "FPL Points": 0, "FPL Conceded": 0,
-                "FPL Diff": 0, "Tournament Points": 0
-            }
+        for group_name, members in st.session_state["groups"].items():
+            team_list = members[:]
+            if len(team_list) % 2 == 1:
+                team_list.append({"entry_name": "BYE", "player_name": "", "entry": None})
 
-    # 📌 **Show League Tables Properly**
-    st.subheader("📊 Group Standings")
+            num_rounds = len(team_list) - 1
+            for round_num in range(num_rounds):
+                for i in range(len(team_list) // 2):
+                    home_team = team_list[i]
+                    away_team = team_list[-(i + 1)]
+                    if home_team["entry_name"] == "BYE" or away_team["entry_name"] == "BYE":
+                        continue  # Skip bye matches
 
-    for group_name, standings in group_standings.items():
-        st.markdown(f"### {group_name}")
+                    gameweek = selected_gameweeks[(round_num) % required_gameweeks]
+                    gameweek_schedule[gameweek].append((group_name, home_team, away_team))
 
-        # Convert standings dictionary into a DataFrame
-        df = pd.DataFrame(list(standings.values()))
+                team_list.insert(1, team_list.pop())
 
-        # Sort by Tournament Points → FPL Points Difference → Total FPL Points
-        df = df.sort_values(
-            by=["Tournament Points", "FPL Diff", "FPL Points"],
-            ascending=[False, False, False]
-        )
+        # 🔹 **Fetch real-time FPL points and update standings**
+        for gameweek, matches in gameweek_schedule.items():
+            st.write(f"### Game Week {gameweek}")
+            for group_name, home_team, away_team in matches:
+                result = f"**{home_team['entry_name']} ({home_team['player_name']})** vs **{away_team['entry_name']} ({away_team['player_name']})**"
+                st.write(result)
 
-        # Display nicely formatted table
-        st.dataframe(df.set_index("Team"))
+        # 🔹 **Display Group Standings**
+        st.subheader("📊 Group Standings")
+        for group_name, teams in st.session_state["groups"].items():
+            st.markdown(f"### {group_name}")
+            team_data = [{"Team": f"{team['entry_name']} ({team['player_name']})"} for team in teams]
+            df = pd.DataFrame(team_data)
+            st.dataframe(df)
