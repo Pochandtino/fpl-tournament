@@ -17,6 +17,9 @@ st.sidebar.header("Tournament Settings")
 league_id = st.sidebar.text_input("Enter League ID", value="857")
 num_groups = st.sidebar.slider("Number of Groups", 2, 8, 4)
 matches_per_opponent = st.sidebar.radio("Matches Against Each Opponent", [1, 2], index=1)
+
+# ✅ Manual Group Assignment Toggle
+manual_grouping = st.sidebar.checkbox("Manually Assign Groups", value=True)
 randomize_groups = st.sidebar.button("Randomize Groups")
 
 # 📌 Get Current Game Week
@@ -37,37 +40,55 @@ def fetch_fpl_data(league_id):
     response = requests.get(url)
     return response.json() if response.status_code == 200 else {}
 
-def fetch_team_gameweek_points(manager_id):
-    """Fetch a team's FPL points for each Game Week."""
-    url = f"{BASE_URL}/entry/{manager_id}/history/"
-    response = requests.get(url)
-
-    if response.status_code != 200:
-        return {}  # Return empty dict if API call fails
-
-    data = response.json()
-    return {gw["event"]: gw["points"] for gw in data.get("current", [])}
-
 # 📌 Fetch League Data
 if "fpl_data" not in st.session_state:
     if st.sidebar.button("Fetch Data"):
         st.session_state["fpl_data"] = fetch_fpl_data(league_id)
 
-# 📌 Assign Teams to Groups
+# 📌 Assign Teams to Groups (Manual or Random)
 if "fpl_data" in st.session_state:
     teams = st.session_state["fpl_data"]["standings"]["results"]
     num_teams = len(teams)
-
-    # ✅ Auto-assign teams into groups OR allow manual selection
-    if "groups" not in st.session_state or randomize_groups:
-        random.shuffle(teams)
+    
+    # ✅ Initialize group storage
+    if "groups" not in st.session_state:
         st.session_state["groups"] = {f"Group {chr(65+i)}": [] for i in range(num_groups)}
-        for i, team in enumerate(teams):
-            group_name = f"Group {chr(65 + (i % num_groups))}"
-            st.session_state["groups"][group_name].append(team)
+
+    # 📌 Manual Group Assignment UI
+    st.subheader("🔀 Assign Teams to Groups")
+    
+    if manual_grouping:
+        # ✅ Manually assign teams to groups
+        manual_team_groups = {}
+        for team in teams:
+            selected_group = st.selectbox(
+                f"Select group for {team['entry_name']} ({team['player_name']})",
+                [f"Group {chr(65+i)}" for i in range(num_groups)],
+                key=f"group_select_{team['entry']}"
+            )
+            manual_team_groups[team["entry"]] = selected_group
+
+        # ✅ Store manual group assignments
+        if st.button("Save Manual Group Assignments"):
+            st.session_state["groups"] = {group: [] for group in manual_team_groups.values()}
+            for team in teams:
+                assigned_group = manual_team_groups.get(team["entry"], None)
+                if assigned_group:
+                    st.session_state["groups"][assigned_group].append(team)
+            st.success("✅ Groups updated manually!")
+
+    else:
+        # 📌 Randomly assign teams to groups
+        if randomize_groups:
+            random.shuffle(teams)
+            st.session_state["groups"] = {f"Group {chr(65+i)}": [] for i in range(num_groups)}
+            for i, team in enumerate(teams):
+                group_name = f"Group {chr(65 + (i % num_groups))}"
+                st.session_state["groups"][group_name].append(team)
+            st.success("✅ Groups randomized!")
 
     # 📌 **Display Groups Clearly**
-    st.subheader("🔀 Group Stage Teams")
+    st.subheader("📌 Group Stage Teams")
     for group_name, members in st.session_state["groups"].items():
         st.markdown(f"### {group_name}")
         for team in members:
@@ -96,7 +117,6 @@ if "fpl_data" in st.session_state:
 
     if len(selected_gameweeks) >= required_gameweeks:
         gameweek_schedule = {gw: [] for gw in selected_gameweeks}
-        standings = {group: {} for group in st.session_state["groups"]}
 
         for group_name, members in st.session_state["groups"].items():
             team_list = members[:]
@@ -120,50 +140,13 @@ if "fpl_data" in st.session_state:
         for gameweek, matches in gameweek_schedule.items():
             st.write(f"### Game Week {gameweek}")
             for group_name, home_team, away_team in matches:
-                home_team_id = home_team.get("entry", None)
-                away_team_id = away_team.get("entry", None)
-
-                if gameweek > CURRENT_GAMEWEEK:
-                    home_points, away_points = "-", "-"  # Show blank for future matches
-                elif home_team_id and away_team_id:
-                    home_points = fetch_team_gameweek_points(home_team_id).get(gameweek, "-")
-                    away_points = fetch_team_gameweek_points(away_team_id).get(gameweek, "-")
-                else:
-                    home_points, away_points = "-", "-"
-
-                result = f"**{home_team['entry_name']} ({home_team['player_name']})** ({home_points}) vs **{away_team['entry_name']} ({away_team['player_name']})** ({away_points})"
+                result = f"**{home_team['entry_name']} ({home_team['player_name']})** vs **{away_team['entry_name']} ({away_team['player_name']})**"
                 st.write(result)
-
-                if gameweek <= CURRENT_GAMEWEEK:  # ✅ Only count completed matches in standings
-                    if group_name not in standings:
-                        standings[group_name] = {}
-
-                    for team, score, conceded in [(home_team, home_points, away_points), (away_team, away_points, home_points)]:
-                        if team["entry"] not in standings[group_name]:
-                            standings[group_name][team["entry"]] = {
-                                "Team": f"{team['entry_name']} ({team['player_name']})",
-                                "P": 0, "W": 0, "D": 0, "L": 0, "F": 0, "A": 0, "GD": 0, "Pts": 0
-                            }
-
-                        standings[group_name][team["entry"]]["P"] += 1
-                        standings[group_name][team["entry"]]["F"] += int(score) if score != "-" else 0
-                        standings[group_name][team["entry"]]["A"] += int(conceded) if conceded != "-" else 0
-                        standings[group_name][team["entry"]]["GD"] = standings[group_name][team["entry"]]["F"] - standings[group_name][team["entry"]]["A"]
-
-                        if score != "-" and conceded != "-":
-                            if score > conceded:
-                                standings[group_name][team["entry"]]["W"] += 1
-                                standings[group_name][team["entry"]]["Pts"] += 3
-                            elif score < conceded:
-                                standings[group_name][team["entry"]]["L"] += 1
-                            else:
-                                standings[group_name][team["entry"]]["D"] += 1
-                                standings[group_name][team["entry"]]["Pts"] += 1
 
         # 🔹 **Display Group Standings**
         st.subheader("📊 Group Standings")
-        for group_name, group_standings in standings.items():
+        for group_name, teams in st.session_state["groups"].items():
             st.markdown(f"### {group_name}")
-            df = pd.DataFrame(list(group_standings.values()))
-            df = df.sort_values(by=["Pts", "GD", "F"], ascending=[False, False, False])
+            team_data = [{"Team": f"{team['entry_name']} ({team['player_name']})"} for team in teams]
+            df = pd.DataFrame(team_data)
             st.dataframe(df)
